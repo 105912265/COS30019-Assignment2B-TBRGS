@@ -1,0 +1,8 @@
+{
+  "sequence_length": 12,
+  "speed_limit_kmh": 60,
+  "intersection_delay_seconds": 30,
+  "max_routes": 5,
+  "default_model": "lstm",
+  "test_size": 0.2
+}
