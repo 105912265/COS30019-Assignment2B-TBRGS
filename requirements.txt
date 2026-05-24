@@ -5,3 +5,5 @@ matplotlib
 joblib
 streamlit
 tensorflow
+xlrd
+openpyxl
