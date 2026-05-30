@@ -1,11 +1,11 @@
+
 import math
 
 
 SPEED_LIMIT_KMH = 60
 INTERSECTION_DELAY_SECONDS = 30
 
-# From Traffic Flow to Travel Time Conversion PDF:
-# flow = -1.4648375 * speed^2 + 93.75 * speed
+# From the Assignment 2B traffic-flow-to-speed model.
 A = -1.4648375
 B = 93.75
 
@@ -16,17 +16,17 @@ CAPACITY_FLOW = 1500
 def flow_to_speed(flow_vph):
     """
     Convert traffic flow in vehicles/hour to speed in km/h.
-    speed is capped at 60 km/h
-    therwise follows a quadratic relationship.
+
+    Low flow is capped at the 60 km/h speed limit. Higher flow uses the
+    under-capacity branch of the quadratic flow-speed relationship.
     """
 
     if flow_vph <= LOW_FLOW_THRESHOLD:
         return SPEED_LIMIT_KMH
 
-    # Avoid impossible values above the capacity used in the assignment model.
     flow_vph = min(flow_vph, CAPACITY_FLOW)
 
-    # A * speed^2 + B * speed - flow = 0
+    # Rearranged equation: A * speed^2 + B * speed - flow = 0
     c = -flow_vph
     discriminant = (B ** 2) - (4 * A * c)
 
@@ -34,14 +34,10 @@ def flow_to_speed(flow_vph):
         return 32
 
     sqrt_disc = math.sqrt(discriminant)
-
     speed_1 = (-B + sqrt_disc) / (2 * A)
     speed_2 = (-B - sqrt_disc) / (2 * A)
 
-    # Under-capacity branch = higher speed
     speed = max(speed_1, speed_2)
-
-    # Safety limits
     speed = min(speed, SPEED_LIMIT_KMH)
     speed = max(speed, 1)
 
@@ -53,10 +49,11 @@ def calculate_travel_time(distance_km, predicted_flow_15min):
     Convert predicted 15-minute traffic flow into travel time in minutes.
 
     Args:
-        distance_km: distance between two SCATS sites in kilometres
-        predicted_flow_15min: predicted traffic count for one 15-minute interval
+        distance_km: distance between two SCATS sites in kilometres.
+        predicted_flow_15min: predicted vehicle count for one 15-minute interval.
 
-    Returns: travel time in minutes
+    Returns:
+        float: travel time in minutes.
     """
 
     flow_vph = predicted_flow_15min * 4
@@ -64,7 +61,6 @@ def calculate_travel_time(distance_km, predicted_flow_15min):
 
     travel_time_hours = distance_km / speed_kmh
     travel_time_seconds = travel_time_hours * 3600
-
     total_seconds = travel_time_seconds + INTERSECTION_DELAY_SECONDS
 
     return total_seconds / 60
@@ -72,8 +68,10 @@ def calculate_travel_time(distance_km, predicted_flow_15min):
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """
-    Calculate straight-line distance between two lat/long coordinates.
-    Returns distance in kilometres.
+    Calculate straight-line distance between two latitude/longitude points.
+
+    Returns:
+        float: distance in kilometres.
     """
 
     earth_radius_km = 6371
@@ -92,7 +90,6 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     )
 
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
     return earth_radius_km * c
 
 
