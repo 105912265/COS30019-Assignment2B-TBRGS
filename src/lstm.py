@@ -111,5 +111,5 @@ os.makedirs("models", exist_ok=True)
 model.save("models/lstm/lstm_model.h5")
 joblib.dump(scaler, "models/lstm/lstm_scaler.pkl")
 
-print("Model saved as lstm_model.h5")
-print("Scaler saved as lstm_scaler.pkl")
+print("Model saved as models/lstm/lstm_model.h5")
+print("Scaler saved as models/lstm/lstm_scaler.pkl")

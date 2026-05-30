@@ -85,11 +85,11 @@ plt.show()
 # save model and scaler
 import os
 os.makedirs('models', exist_ok=True)
-model.save('models/gru_model.h5')
-joblib.dump(scaler, 'models/gru_scaler.pkl')
+model.save('models/gru/gru_model.h5')
+joblib.dump(scaler, 'models/gru/gru_scaler.pkl')
 
-print("Model saved as models/gru_model.h5")
+print("Model saved as models/gru/gru_model.h5")
 print("Current directory:", os.getcwd())
 os.makedirs('models', exist_ok=True)
-model.save('models/gru_model.h5')
+model.save('models/gru/gru_model.h5')
 print("Model saved successfully")
