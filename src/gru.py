@@ -90,6 +90,6 @@ joblib.dump(scaler, 'models/gru/gru_scaler.pkl')
 
 print("Model saved as models/gru/gru_model.h5")
 print("Current directory:", os.getcwd())
-os.makedirs('models', exist_ok=True)
+os.makedirs("models/gru", exist_ok=True)
 model.save('models/gru/gru_model.h5')
 print("Model saved successfully")

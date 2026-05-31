@@ -7,7 +7,7 @@ from src.travel_time import haversine_distance, calculate_travel_time
 DATA_FILE = "processed/all_data.csv"
 
 
-# Dummy/demo SCATS connections for testing the integration pipeline.
+# simplified SCATS graph connections for testing the integration pipeline.
 # Each tuple means: (from_scats, to_scats).
 # These are not meant to be the final verified Boroondara road links yet.
 SCATS_CONNECTIONS = [

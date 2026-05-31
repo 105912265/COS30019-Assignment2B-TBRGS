@@ -118,8 +118,10 @@ plt.show()
 
 
 # Save model and scaler
-model.save("models/rnn/simple_rnn_model.h5")
-joblib.dump(scaler, "models/rnn/simple_rnn_scaler.pkl")
+os.makedirs("models/rnn", exist_ok=True)
 
-print("Model saved as simple_rnn_model.h5")
-print("Scaler saved as simple_rnn_scaler.pkl")
+model.save("models/rnn/rnn_model.h5")
+joblib.dump(scaler, "models/rnn/rnn_scaler.pkl")
+
+print("Model saved as models/rnn/rnn_model.h5")
+print("Scaler saved as models/rnn/rnn_scaler.pkl")

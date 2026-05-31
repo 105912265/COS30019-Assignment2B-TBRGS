@@ -5,9 +5,5 @@ matplotlib
 joblib
 streamlit
 tensorflow
-<<<<<<< Updated upstream
 xlrd
 openpyxl
-=======
-xlrd
->>>>>>> Stashed changes

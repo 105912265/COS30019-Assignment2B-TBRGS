@@ -47,7 +47,24 @@ def astar_search(graph, start, goal):
             )
 
     return None, float("inf")
+def find_top_k_paths(graph, start, goal, k=5):
+    routes = []
+    frontier = [(0, start, [start])]
 
+    while frontier and len(routes) < k:
+        cost_so_far, current, path = heapq.heappop(frontier)
+
+        if current == goal:
+            routes.append((path, cost_so_far))
+            continue
+
+        for neighbour, travel_time in graph.get(current, []):
+            if neighbour not in path:
+                new_path = path + [neighbour]
+                new_cost = cost_so_far + travel_time
+                heapq.heappush(frontier, (new_cost, neighbour, new_path))
+
+    return routes
 
 if __name__ == "__main__":
     test_graph = {
@@ -59,5 +76,12 @@ if __name__ == "__main__":
 
     path, cost = astar_search(test_graph, 2000, 3002)
 
-    print("Path:", path)
+    print("Best path:", path)
     print("Travel time:", round(cost, 2), "minutes")
+
+    routes = find_top_k_paths(test_graph, 2000, 3002, k=5)
+
+    print("\nTop routes:")
+    for index, (route, total_time) in enumerate(routes, start=1):
+        print(f"{index}. Path: {route}")
+        print(f"   Travel time: {round(total_time, 2)} minutes")

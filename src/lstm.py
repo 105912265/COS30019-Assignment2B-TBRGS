@@ -106,7 +106,7 @@ plt.ylabel("Traffic Flow")
 plt.legend()
 plt.show()
 
-os.makedirs("models", exist_ok=True)
+os.makedirs("models/lstm", exist_ok=True)
 
 model.save("models/lstm/lstm_model.h5")
 joblib.dump(scaler, "models/lstm/lstm_scaler.pkl")
