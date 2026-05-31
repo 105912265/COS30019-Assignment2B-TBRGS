@@ -44,7 +44,13 @@ def load_scats_series(scats_id):
         raise ValueError(f"SCATS site {scats_id} not found in dataset.")
 
     site_data["datetime"] = pd.to_datetime(site_data["datetime"])
-    site_data = site_data.sort_values("datetime")
+
+    site_data = (
+        site_data
+        .groupby("datetime", as_index=False)["traffic_flow"]
+        .sum()
+        .sort_values("datetime")
+    )
 
     return site_data["traffic_flow"].values.reshape(-1, 1)
 
@@ -88,7 +94,7 @@ def predict_next_flow(scats_id, model_type="lstm", seq_length=SEQ_LENGTH):
     prediction_scaled = model.predict(X, verbose=0)
     prediction_actual = scaler.inverse_transform(prediction_scaled)
 
-    return float(prediction_actual[0][0])
+    return max(float(prediction_actual[0][0]), 0)
 
 
 if __name__ == "__main__":

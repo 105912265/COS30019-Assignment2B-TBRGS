@@ -11,6 +11,19 @@ EDGE_FILE = "processed/graph_edges.csv"
 
 
 def load_scats_metadata():
+    """
+    Load one metadata record per SCATS site.
+
+    This includes:
+    - SCATS ID
+    - location name
+    - latitude
+    - longitude
+
+    This function is useful if the GUI or route output needs to display
+    intersection names beside SCATS IDs.
+    """
+
     df = pd.read_csv(DATA_FILE)
 
     metadata_df = df[
@@ -32,6 +45,15 @@ def load_scats_metadata():
 
 
 def load_generated_edges():
+    """
+    Load the generated SCATS edges from processed/graph_edges.csv.
+
+    graph_edges.csv is created by running:
+        py -m src.graph_builder
+
+    Each row represents a connection between two SCATS sites.
+    """
+
     if not os.path.exists(EDGE_FILE):
         raise FileNotFoundError(
             f"{EDGE_FILE} was not found. Run this first: py -m src.graph_builder"
@@ -49,6 +71,18 @@ def load_generated_edges():
 
 
 def build_distance_graph(bidirectional=True):
+    """
+    Build a graph where edge costs are distances in kilometres.
+
+    Output format:
+        {
+            2000: [(3682, 1.65), (3685, 0.34)],
+            3682: [(2000, 1.65), (3126, 1.03)]
+        }
+
+    This distance graph is later converted into a travel-time graph.
+    """
+
     edges_df = load_generated_edges()
 
     graph = {}
@@ -66,6 +100,7 @@ def build_distance_graph(bidirectional=True):
         if bidirectional:
             graph[to_scats].append((from_scats, distance_km))
 
+    # Sort neighbours so output is stable and easier to test/debug.
     for node in graph:
         graph[node] = sorted(graph[node], key=lambda edge: edge[0])
 
@@ -73,6 +108,21 @@ def build_distance_graph(bidirectional=True):
 
 
 def build_travel_time_graph(model_type="lstm", verbose=True):
+    """
+    Convert the distance graph into a travel-time graph.
+
+    For each edge:
+        1. Predict traffic flow for the starting SCATS site.
+        2. Use predicted flow + distance to estimate travel time.
+        3. Store travel time as the edge cost.
+
+    Output format:
+        {
+            2000: [(3682, 2.15), (3685, 0.84)],
+            3682: [(2000, 2.15), (3126, 1.53)]
+        }
+    """
+
     distance_graph = build_distance_graph(bidirectional=True)
 
     travel_time_graph = {}
@@ -81,6 +131,7 @@ def build_travel_time_graph(model_type="lstm", verbose=True):
     for from_scats, neighbours in distance_graph.items():
         travel_time_graph[from_scats] = []
 
+        # Cache predictions so each SCATS site is predicted only once.
         if from_scats not in prediction_cache:
             prediction_cache[from_scats] = predict_next_flow(
                 scats_id=from_scats,

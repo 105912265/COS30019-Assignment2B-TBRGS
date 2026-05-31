@@ -59,10 +59,10 @@ def main():
         print("No route found between these SCATS sites.")
         return
 
+    print("\nTop routes:")
     for index, (path, total_time) in enumerate(routes, start=1):
-        print(f"\nRoute {index}")
-        print("Path:", path)
-        print("Estimated travel time:", round(total_time, 2), "minutes")
+        print(f"{index}. Path: {path}")
+        print(f"   Estimated travel time: {round(total_time, 2)} minutes")
 
 
 if __name__ == "__main__":
