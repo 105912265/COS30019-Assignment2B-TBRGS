@@ -1,63 +1,89 @@
 import heapq
 
 
-def astar_search(graph, start, goal):
-    """
-    Search for the lowest-travel-time path from start to goal.
+def astar_search(graph, origin, destination, banned_edges=None):
 
-    graph format:
-        {
-            2000: [(2200, 2.5), (2820, 3.1)],
-            2200: [(3002, 4.7)],
-            3002: []
-        }
+    #banned_edges is used when finding alternative routes.
 
-    The second value in each edge tuple is travel time in minutes.
-    """
 
-    frontier = []
-    heapq.heappush(frontier, (0, start, [start], 0))
+    if banned_edges is None:
+        banned_edges = set()
 
+    origin = int(origin)
+    destination = int(destination)
+
+    priority_queue = [(0, origin, [origin])]
     visited = set()
 
-    while frontier:
-        _, current, path, cost_so_far = heapq.heappop(frontier)
+    while priority_queue:
+        total_cost, current_node, path = heapq.heappop(priority_queue)
 
-        if current == goal:
-            return path, cost_so_far
+        if current_node == destination:
+            return path, total_cost
 
-        if current in visited:
+        if current_node in visited:
             continue
 
-        visited.add(current)
+        visited.add(current_node)
 
-        for neighbour, travel_time in graph.get(current, []):
-            if neighbour in visited:
+        for neighbour, edge_cost in graph.get(current_node, []):
+            edge = (current_node, neighbour)
+
+            if edge in banned_edges:
                 continue
 
-            new_cost = cost_so_far + travel_time
+            if neighbour not in visited:
+                new_cost = total_cost + edge_cost
+                new_path = path + [neighbour]
 
-            # Heuristic is set to 0 for the dummy integration graph.
-            # This behaves like uniform-cost search while keeping the A* structure.
-            heuristic = 0
-
-            heapq.heappush(
-                frontier,
-                (new_cost + heuristic, neighbour, path + [neighbour], new_cost),
-            )
+                heapq.heappush(
+                    priority_queue,
+                    (new_cost, neighbour, new_path)
+                )
 
     return None, float("inf")
 
 
-if __name__ == "__main__":
-    test_graph = {
-        2000: [(2200, 3.0), (2820, 4.5)],
-        2200: [(3002, 5.0)],
-        2820: [(3002, 2.0)],
-        3002: [],
-    }
+def find_top_k_routes(graph, origin, destination, k=5):
+    """
+    Finds up to k routes using repeated A*.
 
-    path, cost = astar_search(test_graph, 2000, 3002)
+    Route 1 is the normal A* route.
+    For each next route, one edge from a previous route is temporarily banned,
+    then A* is run again to find an alternative path.
+    """
 
-    print("Path:", path)
-    print("Travel time:", round(cost, 2), "minutes")
+    routes = []
+    banned_edges_sets = [set()]
+    tried_paths = set()
+
+    while banned_edges_sets and len(routes) < k:
+        banned_edges = banned_edges_sets.pop(0)
+
+        path, total_time = astar_search(
+            graph=graph,
+            origin=origin,
+            destination=destination,
+            banned_edges=banned_edges
+        )
+
+        if path is None:
+            continue
+
+        path_tuple = tuple(path)
+
+        if path_tuple in tried_paths:
+            continue
+
+        tried_paths.add(path_tuple)
+        routes.append((path, total_time))
+
+        # Create alternative searches by banning one edge from this route
+        for i in range(len(path) - 1):
+            new_banned_edges = set(banned_edges)
+            new_banned_edges.add((path[i], path[i + 1]))
+            banned_edges_sets.append(new_banned_edges)
+
+    routes.sort(key=lambda route: route[1])
+
+    return routes[:k]
