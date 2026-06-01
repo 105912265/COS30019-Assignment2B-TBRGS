@@ -675,7 +675,7 @@ def render_status_page() -> None:
 def main() -> None:
     st.set_page_config(page_title="COS30019 TBRGS", page_icon="🚦", layout="wide")
     st.title("Traffic-Based Route Guidance System")
-    st.caption("COS30019 Assignment 2B — Interactive map powered by OpenStreetMap & Folium")
+    st.caption("COS30019 Assignment 2B — Interactive map powered by OpenStreetMap or CartoDb & Folium")
 
     if not MAIN_FILE.exists():
         st.error("main.py was not found in the project root.")
