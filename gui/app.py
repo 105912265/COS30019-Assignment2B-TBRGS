@@ -1,7 +1,7 @@
 """
 Streamlit GUI for COS30019 Assignment 2B.
 
-already contains correct WGS84 lat/lon for all 40 sites. The site 4266 (AUBURN_RD N of BURWOOD_RD)'s CSV entry has zeroed out
+All_data.csv already contains correct WGS84 lat/lon for all 40 sites. The site 4266 (AUBURN_RD N of BURWOOD_RD)'s CSV entry has zeroed out
 coordinates; its true position is supplied in SCATS_COORD_FIXES below.
 
 Run from the project root with:
@@ -454,9 +454,46 @@ def render_osm_map(routes: list, graph: dict | None = None) -> None:
 
 # Sidebar
 
+def _load_scats_options() -> list[int]:
+    """Return sorted list of SCATS site IDs from all_data.csv."""
+    try:
+        df = pd.read_csv(DATA_FILE, usecols=["scats_id"]).drop_duplicates()
+        return sorted(int(x) for x in df["scats_id"].tolist())
+    except Exception:
+        return [DEFAULT_ORIGIN, DEFAULT_DESTINATION]
+
+
+def _load_scats_labels() -> dict[int, str]:
+    """Return a mapping of SCATS site ID to display label (ID - location)."""
+    try:
+        meta_df = pd.read_csv(
+            DATA_FILE,
+            usecols=["scats_id", "location"]
+        ).drop_duplicates("scats_id")
+
+        return {
+            int(r["scats_id"]): f"{int(r['scats_id'])} -- {r['location']}"
+            for _, r in meta_df.iterrows()
+        }
+    except Exception:
+        return {}
+
 def render_sidebar() -> dict[str, Any]:
     st.sidebar.header("TBRGS Settings")
     st.sidebar.write("Select route parameters, then apply them to `main.py`.")
+
+    scats_options = _load_scats_options()
+    id_to_label = _load_scats_labels()
+
+    default_origin_idx = (
+        scats_options.index(DEFAULT_ORIGIN)
+        if DEFAULT_ORIGIN in scats_options else 0
+    )
+
+    default_destination_idx = (
+        scats_options.index(DEFAULT_DESTINATION)
+        if DEFAULT_DESTINATION in scats_options else 0
+    )
 
     draft_model = st.sidebar.selectbox(
         "Traffic prediction model",
@@ -465,13 +502,20 @@ def render_sidebar() -> dict[str, Any]:
         format_func=lambda value: MODEL_OPTIONS[value],
         key="draft_model_type",
     )
-    draft_origin = st.sidebar.number_input(
-        "Origin SCATS site", min_value=0, max_value=999999,
-        value=DEFAULT_ORIGIN, step=1, key="draft_origin",
+    draft_origin = st.sidebar.selectbox(
+        "Origin SCATS site",
+        options=scats_options,
+        index=default_origin_idx,
+        format_func=lambda sid: id_to_label.get(sid, str(sid)),
+        key="draft_origin",
     )
-    draft_destination = st.sidebar.number_input(
-        "Destination SCATS site", min_value=0, max_value=999999,
-        value=DEFAULT_DESTINATION, step=1, key="draft_destination",
+
+    draft_destination = st.sidebar.selectbox(
+        "Destination SCATS site",
+        options=scats_options,
+        index=default_destination_idx,
+        format_func=lambda sid: id_to_label.get(sid, str(sid)),
+        key="draft_destination",
     )
     draft_max_routes = st.sidebar.slider(
         "Maximum routes to return", min_value=1, max_value=5,
