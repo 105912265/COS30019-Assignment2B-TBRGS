@@ -48,12 +48,6 @@ def calculate_travel_time(distance_km, predicted_flow_15min):
     """
     Convert predicted 15-minute traffic flow into travel time in minutes.
 
-    Args:
-        distance_km: distance between two SCATS sites in kilometres.
-        predicted_flow_15min: predicted vehicle count for one 15-minute interval.
-
-    Returns:
-        float: travel time in minutes.
     """
 
     flow_vph = predicted_flow_15min * 4
@@ -69,9 +63,6 @@ def calculate_travel_time(distance_km, predicted_flow_15min):
 def haversine_distance(lat1, lon1, lat2, lon2):
     """
     Calculate straight-line distance between two latitude/longitude points.
-
-    Returns:
-        float: distance in kilometres.
     """
 
     earth_radius_km = 6371

@@ -5,10 +5,6 @@ def astar_search(graph, origin, destination, banned_edges=None):
     """
     Finds the lowest travel-time route from origin to destination.
 
-    In Part B:
-    - graph nodes are SCATS sites
-    - edge costs are estimated travel times
-    - banned_edges is used when finding alternative routes
     """
 
     if banned_edges is None:
@@ -61,11 +57,6 @@ def find_top_k_routes(graph, origin, destination, k=5):
     For each next route, one edge from a previous route is temporarily banned,
     then A* is run again to find an alternative path.
 
-    Returns:
-    [
-        ([2000, 3682, 3126, 3002], 10.5),
-        ([2000, 3685, 970, 3002], 12.3)
-    ]
     """
 
     routes = []

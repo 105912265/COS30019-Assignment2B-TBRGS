@@ -72,14 +72,7 @@ def load_generated_edges():
 
 def build_distance_graph(bidirectional=True):
     """
-    Build a graph where edge costs are distances in kilometres.
-
-    Output format:
-        {
-            2000: [(3682, 1.65), (3685, 0.34)],
-            3682: [(2000, 1.65), (3126, 1.03)]
-        }
-
+    Build a graph where edge costs are distances in kilometres
     This distance graph is later converted into a travel-time graph.
     """
 

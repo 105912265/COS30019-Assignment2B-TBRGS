@@ -29,12 +29,6 @@ MODEL_PATHS = {
 def load_scats_series(scats_id):
     """
     Load traffic flow data for one SCATS site from the processed CSV file.
-
-    Args:
-        scats_id: SCATS site number, for example 2000.
-
-    Returns:
-        numpy.ndarray: traffic flow values shaped as (n, 1).
     """
 
     df = pd.read_csv(DATA_FILE)
@@ -59,13 +53,6 @@ def predict_next_flow(scats_id, model_type="lstm", seq_length=SEQ_LENGTH):
     """
     Predict the next 15-minute traffic flow for a SCATS site.
 
-    Args:
-        scats_id: SCATS site number.
-        model_type: "lstm", "gru", or "rnn".
-        seq_length: number of previous readings used for prediction.
-
-    Returns:
-        float: predicted traffic flow for the next 15-minute interval.
     """
 
     model_type = model_type.lower()
