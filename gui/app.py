@@ -1,10 +1,8 @@
 """
 Streamlit GUI for COS30019 Assignment 2B.
 
-This file is deliberately a thin graphical interface. It does not load the
-processed dataset, route graph, model files, configuration file, or project
-algorithm modules itself. The selected GUI parameters are passed directly to
-main.py, and the printed result from main.py is displayed in the GUI.
+already contains correct WGS84 lat/lon for all 40 sites. The site 4266 (AUBURN_RD N of BURWOOD_RD)'s CSV entry has zeroed out
+coordinates; its true position is supplied in SCATS_COORD_FIXES below.
 
 Run from the project root with:
     streamlit run gui/app.py
@@ -22,12 +20,10 @@ from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 from typing import Any
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.patches as mpatches
-import matplotlib.pyplot as plt
-import networkx as nx
+import folium
+from folium.plugins import AntPath, MeasureControl
 import streamlit as st
+import streamlit.components.v1 as components
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 MAIN_FILE = ROOT_DIR / "main.py"
@@ -43,14 +39,78 @@ DEFAULT_DESTINATION = 3002
 DEFAULT_MAX_ROUTES = 5
 DEFAULT_MODEL = "lstm"
 
+# SCATS coordinate registry from alldata.csv
+import pandas as pd
+
+DATA_FILE = ROOT_DIR / "processed" / "all_data.csv"
+
+# True WGS84 fix for sites whose CSV entry has lat=0 or lon=0.
+SCATS_COORD_FIXES: dict[int, tuple[float, float]] = {
+    4266: (-37.823_5, 145.043_5),   # AUBURN_RD N of BURWOOD_RD, Hawthorn East
+}
+
+# Fallback map centre (inner east Melbourne) used only if the CSV is missing.
+MELBOURNE_CENTRE = (-37.820, 145.060)
+
+# Module level cache, loaded once per session.
+_SCATS_COORDS: dict[int, tuple[float, float]] | None = None
+
+
+def _load_scats_coords() -> dict[int, tuple[float, float]]:
+    """Load and cache (lat, lon) for every SCATS site from all_data.csv."""
+    global _SCATS_COORDS
+    if _SCATS_COORDS is not None:
+        return _SCATS_COORDS
+
+    coords: dict[int, tuple[float, float]] = {}
+    try:
+        df = pd.read_csv(DATA_FILE, usecols=["scats_id", "latitude", "longitude"])
+        for _, row in df.drop_duplicates("scats_id").iterrows():
+            sid = int(row["scats_id"])
+            lat, lon = float(row["latitude"]), float(row["longitude"])
+            # Apply fix for zeroed out entries
+            if sid in SCATS_COORD_FIXES:
+                coords[sid] = SCATS_COORD_FIXES[sid]
+            elif lat != 0.0 and lon != 0.0:
+                coords[sid] = (lat, lon)
+            else:
+                coords[sid] = SCATS_COORD_FIXES.get(sid, MELBOURNE_CENTRE)
+    except Exception:
+        pass  # Caller falls back to MELBOURNE_CENTRE
+
+    _SCATS_COORDS = coords
+    return coords
+
+
+def site_coords(site_id: int, _graph=None) -> tuple[float, float]:
+    """Return the WGS84 (lat, lon) for a SCATS site ID."""
+    return _load_scats_coords().get(site_id, MELBOURNE_CENTRE)
+
+
+# Traffic colour helpers (Google Maps style)
+ROUTE_PALETTE = [
+    "#1A73E8",  # Google-blue  — route 1
+    "#34A853",  # Google-green — route 2
+    "#FBBC04",  # Google-amber — route 3
+    "#EA4335",  # Google-red   — route 4
+    "#9C27B0",  # Purple       — route 5
+]
+
+def travel_time_color(minutes_per_segment: float) -> str:
+    """Return a traffic-light colour for a segment's speed."""
+    if minutes_per_segment < 1.5:
+        return "#00C853"   # fast  — green
+    if minutes_per_segment < 3.0:
+        return "#FFD600"   # medium — amber
+    return "#D50000"       # slow   — red
+
+
+# main.py loader / runner
 
 def load_main_module():
-    """Load main.py so the GUI can call main.main(...) directly."""
-
     spec = importlib.util.spec_from_file_location("tbrgs_main", MAIN_FILE)
     if spec is None or spec.loader is None:
         raise RuntimeError("Unable to load main.py")
-
     module = importlib.util.module_from_spec(spec)
     original_sys_path = list(sys.path)
     try:
@@ -59,23 +119,18 @@ def load_main_module():
         spec.loader.exec_module(module)
     finally:
         sys.path = original_sys_path
-
     return module
 
 
 def run_main_py(model_type: str, origin: int, destination: int, max_routes: int) -> dict[str, Any]:
-    """Call main.py with GUI-selected parameters and capture its printed output."""
-
     params = {
         "model_type": model_type,
         "origin": int(origin),
         "destination": int(destination),
         "max_routes": int(max_routes),
     }
-
     stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
-
     try:
         main_module = load_main_module()
         with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
@@ -105,8 +160,6 @@ def run_main_py(model_type: str, origin: int, destination: int, max_routes: int)
 
 
 def parse_main_routes(stdout: str) -> list[dict[str, Any]]:
-    """Parse the text route output produced by main.py."""
-
     rows: list[dict[str, Any]] = []
     lines = stdout.splitlines()
     index = 0
@@ -115,7 +168,6 @@ def parse_main_routes(stdout: str) -> list[dict[str, Any]]:
         if not path_match:
             index += 1
             continue
-
         route_no = int(path_match.group(1))
         raw_path = path_match.group(2)
         path_text = raw_path
@@ -125,195 +177,284 @@ def parse_main_routes(stdout: str) -> list[dict[str, Any]]:
                 path_text = " → ".join(str(node) for node in parsed_path)
         except Exception:
             pass
-
         travel_time = ""
         if index + 1 < len(lines):
             time_match = re.search(r"Estimated travel time:\s*([0-9.]+)\s*minutes", lines[index + 1])
             if time_match:
                 travel_time = float(time_match.group(1))
-
-        rows.append(
-            {
-                "Route": route_no,
-                "Path": path_text,
-                "Estimated travel time (min)": travel_time,
-            }
-        )
+        rows.append({
+            "Route": route_no,
+            "Path": path_text,
+            "Estimated travel time (min)": travel_time,
+        })
         index += 2
-
     return rows
 
 
-def render_path_graph(routes: list, graph: dict | None = None) -> None:
-    """
-    Draw a graph visualisation of the top path styled like the reference image:
-    red filled nodes and edges for the top path, green for the destination,
-    open gray circles for off-path nodes, edge weights labelled on every edge.
-    """
+# OpenStreetMap map renderer
+
+def _edge_weight(graph: dict | None, u: int, v: int) -> float | None:
+    """Extract edge weight from the adjacency dict/list graph structure."""
+    if not graph or not isinstance(graph, dict):
+        return None
+    neighbours = graph.get(u)
+    if neighbours is None:
+        return None
+    if isinstance(neighbours, dict):
+        return neighbours.get(v)
+    if isinstance(neighbours, list):
+        for item in neighbours:
+            if isinstance(item, (list, tuple)) and len(item) >= 2 and item[0] == v:
+                return item[1]
+    return None
+
+
+def render_osm_map(routes: list, graph: dict | None = None) -> None:
+  
+    # Draw an interactive Folium/OpenStreetMap map showing all returned routes.
+
     if not routes:
+        st.info("No routes to display on the map.")
         return
 
     top_path, top_time = routes[0]
-    if len(top_path) < 2:
-        st.warning("Top path has fewer than 2 nodes — nothing to draw.")
-        return
+    origin_id      = top_path[0]
+    destination_id = top_path[-1]
 
-    origin = top_path[0]
-    destination = top_path[-1]
-    top_edges = set(zip(top_path[:-1], top_path[1:]))
+    # Collect all node coordinates
+    all_nodes: set[int] = set()
+    for path, _ in routes:
+        all_nodes.update(path)
 
-    # Build a NetworkX directed graph
-    G = nx.DiGraph()
-    for node in top_path:
-        G.add_node(node)
-    for u, v in top_edges:
-        w = None
-        if graph and u in graph:
-            neighbours = graph[u]
-            if isinstance(neighbours, dict) and v in neighbours:
-                w = round(neighbours[v], 2)
-        G.add_edge(u, v, weight=w)
-
-    # Add one-hop off-path neighbours — handle both dict and list adjacency
-    if graph:
-        for node in top_path:
-            neighbours = graph.get(node) if hasattr(graph, "get") else None
+    # Add one hop off path neighbours from the graph
+    if graph and isinstance(graph, dict):
+        for node in list(all_nodes):
+            neighbours = graph.get(node)
             if neighbours is None:
                 continue
             if isinstance(neighbours, dict):
-                items = neighbours.items()
+                all_nodes.update(neighbours.keys())
             elif isinstance(neighbours, list):
-                # List of (neighbour, weight) tuples or just neighbour IDs
-                if neighbours and isinstance(neighbours[0], (list, tuple)):
-                    items = [(nb, w) for nb, w in neighbours]
-                else:
-                    items = [(nb, None) for nb in neighbours]
-            else:
-                continue
-            for neighbour, weight in items:
-                if neighbour not in G:
-                    G.add_node(neighbour)
-                if not G.has_edge(node, neighbour):
-                    G.add_edge(node, neighbour, weight=round(weight, 2) if weight is not None else None)
+                for item in neighbours:
+                    if isinstance(item, (list, tuple)) and item:
+                        all_nodes.add(item[0])
+                    elif isinstance(item, int):
+                        all_nodes.add(item)
 
-    # Layout: top-path nodes evenly left-to-right at y=0,
-    # off-path neighbours staggered above/below
-    pos = {}
-    n = len(top_path)
-    for i, node in enumerate(top_path):
-        pos[node] = (i * 2.0, 0.0)
+    coords: dict[int, tuple[float, float]] = {
+        node: site_coords(node, graph) for node in all_nodes
+    }
 
-    off_path_nodes = [node for node in G.nodes if node not in top_path]
-    for i, node in enumerate(off_path_nodes):
-        angle = math.pi * (i + 1) / (len(off_path_nodes) + 1)
-        pos[node] = (
-            (n - 1) * angle / math.pi * 2.0,
-            1.6 * (1 if i % 2 == 0 else -1),
-        )
+    # Map centre and zoom
+    path_lats = [coords[n][0] for n in top_path]
+    path_lons = [coords[n][1] for n in top_path]
+    centre = (sum(path_lats) / len(path_lats), sum(path_lons) / len(path_lons))
 
-    RED_FILL   = "#E24B4A"
-    RED_LIGHT  = "#FCEBEB"
-    GREEN_FILL = "#EAF3DE"
-    GREEN_EDGE = "#3B6D11"
-    GRAY_FILL  = "#F1EFE8"
-    GRAY_EDGE  = "#888780"
-    OFF_EDGE   = "#C8C6BE"
+    # Dynamic zoom: tighter bounds → higher zoom
+    lat_span = max(path_lats) - min(path_lats) + 1e-6
+    lon_span = max(path_lons) - min(path_lons) + 1e-6
+    span = max(lat_span, lon_span)
+    zoom = max(11, min(16, int(13 - math.log2(span / 0.05))))
 
-    node_colors, node_edge_colors, node_lws = [], [], []
-    for node in G.nodes:
-        if node == destination:
-            node_colors.append(GREEN_FILL)
-            node_edge_colors.append(GREEN_EDGE)
-            node_lws.append(2.5)
-        elif node in top_path:
-            node_colors.append(RED_LIGHT)
-            node_edge_colors.append(RED_FILL)
-            node_lws.append(2.0)
+    fmap = folium.Map(
+        location=centre,
+        zoom_start=zoom,
+        tiles="OpenStreetMap",
+        prefer_canvas=True,
+    )
+
+    # CartoDB Positron overlay (cleaner basemap than osm)
+    folium.TileLayer(
+        tiles="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+        attr='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+        name="CartoDB Positron (light)",
+        max_zoom=19,
+    ).add_to(fmap)
+
+    # Each route gets its own toggle in the layer control
+    display_routes = routes[:3]
+    route_layers = []
+    for idx, (rpath, rtime) in enumerate(display_routes):
+        label = f"Route {idx + 1} ({round(rtime, 1)} min)"
+        layer = folium.FeatureGroup(name=label, show=True)
+        route_layers.append(layer)
+
+    layer_offpath = folium.FeatureGroup(name="Off path nodes", show=True)
+    layer_markers = folium.FeatureGroup(name="Site markers",   show=True)
+
+    # Off path node markers
+    on_path_nodes = set(top_path)
+    for node, (lat, lon) in coords.items():
+        if node in on_path_nodes:
+            continue
+        folium.CircleMarker(
+            location=(lat, lon),
+            radius=5,
+            color="#888780",
+            fill=True,
+            fill_color="#F1EFE8",
+            fill_opacity=0.7,
+            weight=1.5,
+            tooltip=folium.Tooltip(f"SCATS {node}"),
+        ).add_to(layer_offpath)
+
+    # Draw each route onto its own layer
+    for idx, (rpath, rtime) in enumerate(display_routes):
+        layer = route_layers[idx]
+        colour = ROUTE_PALETTE[idx % len(ROUTE_PALETTE)]
+        is_top = idx == 0
+
+        if is_top:
+            # Top route: per-segment traffic colouring
+            cumulative = 0.0
+            for i in range(len(rpath) - 1):
+                u, v = rpath[i], rpath[i + 1]
+                weight = _edge_weight(graph, u, v) or 0.0
+                seg_colour = travel_time_color(weight)
+                cumulative += weight
+                seg_coords = [coords[u], coords[v]]
+                popup_html = (
+                    f"<b>{u} to {v}</b><br>"
+                    f"Segment time: <b>{round(weight, 2)} min</b><br>"
+                    f"Cumulative: <b>{round(cumulative, 2)} min</b>"
+                )
+                folium.PolyLine(
+                    locations=seg_coords,
+                    color=seg_colour,
+                    weight=9,
+                    opacity=0.85,
+                    tooltip=f"{u} to {v}: {round(weight, 2)} min",
+                    popup=folium.Popup(popup_html, max_width=260),
+                ).add_to(layer)
+            # Animated direction arrow
+            AntPath(
+                locations=[coords[n] for n in rpath],
+                color="#1A73E8",
+                weight=4,
+                opacity=0.6,
+                delay=600,
+                dash_array=[15, 30],
+                pulse_color="#FFFFFF",
+            ).add_to(layer)
         else:
-            node_colors.append(GRAY_FILL)
-            node_edge_colors.append(GRAY_EDGE)
-            node_lws.append(1.0)
+            # Alternate routes: solid semi-transparent polyline
+            route_coords = [coords[n] for n in rpath]
+            popup_html = (
+                f"<b>Route {idx + 1}</b><br>"
+                f"Est. travel time: <b>{round(rtime, 1)} min</b><br>"
+                f"Nodes: {' to '.join(str(n) for n in rpath)}"
+            )
+            folium.PolyLine(
+                locations=route_coords,
+                color=colour,
+                weight=5,
+                opacity=0.45,
+                tooltip=f"Route {idx + 1}: {round(rtime, 1)} min",
+                popup=folium.Popup(popup_html, max_width=300),
+            ).add_to(layer)
 
-    top_edge_list = [(u, v) for u, v in G.edges if (u, v) in top_edges]
-    off_edge_list = [(u, v) for u, v in G.edges if (u, v) not in top_edges]
-
-    fig, ax = plt.subplots(figsize=(max(8, n * 1.8), 5))
-    fig.patch.set_facecolor("white")
-    ax.set_facecolor("white")
-
-    nx.draw_networkx_edges(
-        G, pos, edgelist=off_edge_list, ax=ax,
-        edge_color=OFF_EDGE, width=1.0, arrows=True,
-        arrowstyle="-|>", arrowsize=12,
-        connectionstyle="arc3,rad=0.08", node_size=900,
-    )
-    nx.draw_networkx_edges(
-        G, pos, edgelist=top_edge_list, ax=ax,
-        edge_color=RED_FILL, width=2.5, arrows=True,
-        arrowstyle="-|>", arrowsize=16,
-        connectionstyle="arc3,rad=0.08", node_size=900,
-    )
-    nx.draw_networkx_nodes(
-        G, pos, nodelist=list(G.nodes), ax=ax,
-        node_color=node_colors,
-        edgecolors=node_edge_colors,
-        linewidths=node_lws,
-        node_size=900,
-    )
-    nx.draw_networkx_labels(
-        G, pos, ax=ax,
-        font_size=8, font_weight="bold", font_color="#2C2C2A",
-    )
-
-    # Cumulative travel-time annotations above each top-path node
+    # Site markers for nodes on the top path
     for i, node in enumerate(top_path):
-        x, y = pos[node]
-        cumulative = sum(
-            G[top_path[j]][top_path[j + 1]].get("weight") or 0
+        lat, lon = coords[node]
+        cumulative_here = sum(
+            _edge_weight(graph, top_path[j], top_path[j + 1]) or 0
             for j in range(i)
         )
-        label = "origin" if i == 0 else f"{round(cumulative, 1)} min"
-        color = GREEN_EDGE if node == destination else RED_FILL
-        ax.annotate(
-            label, xy=(x, y), xytext=(x, y + 0.52),
-            ha="center", va="bottom", fontsize=7.5,
-            color=color, fontweight="bold",
+        if node == origin_id:
+            icon = folium.Icon(color="green", icon="play", prefix="fa")
+            marker_label = "Origin"
+        elif node == destination_id:
+            icon = folium.Icon(color="red", icon="flag-checkered", prefix="fa")
+            marker_label = "Destination"
+        else:
+            icon = folium.Icon(color="blue", icon="map-pin", prefix="fa")
+            marker_label = f"{round(cumulative_here, 1)} min"
+
+        popup_html = (
+            f"<b>SCATS {node}</b><br>"
+            f"{marker_label}<br>"
+            f"Lat: {lat:.5f}, Lon: {lon:.5f}"
         )
+        folium.Marker(
+            location=(lat, lon),
+            icon=icon,
+            tooltip=folium.Tooltip(f"SCATS {node} ({marker_label})"),
+            popup=folium.Popup(popup_html, max_width=220),
+        ).add_to(layer_markers)
 
-    edge_labels = {
-        (u, v): (str(d["weight"]) if d.get("weight") is not None else "")
-        for u, v, d in G.edges(data=True)
-    }
-    nx.draw_networkx_edge_labels(
-        G, pos, edge_labels=edge_labels, ax=ax,
-        font_size=8, font_color="#5F5E5A",
-        bbox=dict(boxstyle="round,pad=0.15", fc="white", ec="none", alpha=0.7),
+    # Assemble layers: off path first, then routes back-to-front, markers on top
+    layer_offpath.add_to(fmap)
+    for layer in reversed(route_layers):
+        layer.add_to(fmap)
+    layer_markers.add_to(fmap)
+
+    # Controls
+    folium.LayerControl(collapsed=False).add_to(fmap)
+    MeasureControl(position="bottomleft", primary_length_unit="kilometers").add_to(fmap)
+
+    # Traffic legend
+    legend_html = """
+    <div style="
+        position: fixed; bottom: 40px; right: 10px; z-index: 9999;
+        background: white; border-radius: 10px; padding: 12px 16px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.25); font-family: 'Helvetica Neue', sans-serif;
+        font-size: 12px; min-width: 170px;">
+      <div style="font-weight:700; margin-bottom:8px; color:#202124;">🚦 Traffic Speed</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+        <div style="width:28px;height:6px;border-radius:3px;background:#00C853;"></div>
+        <span>Fast (&lt; 1.5 min/seg)</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+        <div style="width:28px;height:6px;border-radius:3px;background:#FFD600;"></div>
+        <span>Moderate (1.5–3 min)</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <div style="width:28px;height:6px;border-radius:3px;background:#D50000;"></div>
+        <span>Slow (&gt; 3 min/seg)</span>
+      </div>
+      <div style="border-top:1px solid #e8eaed; padding-top:8px; font-weight:700;
+                  margin-bottom:5px; color:#202124;">🗺 Routes</div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <div style="width:28px;height:6px;border-radius:3px;background:#1A73E8;"></div>
+        <span>Top route (animated)</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:28px;height:6px;border-radius:3px;background:#34A853;opacity:0.55"></div>
+        <span>Alt. routes</span>
+      </div>
+    </div>
+    """
+    fmap.get_root().html.add_child(folium.Element(legend_html))
+
+    # Route summary panel (top left)
+    route_rows = "".join(
+        f"<tr><td style='padding:3px 8px;font-weight:700;color:{ROUTE_PALETTE[i % len(ROUTE_PALETTE)]}'>"
+        f"Route {i+1}</td>"
+        f"<td style='padding:3px 8px;'>{round(t, 1)} min</td>"
+        f"<td style='padding:3px 8px;color:#5f6368;font-size:11px;'>"
+        f"{' → '.join(str(n) for n in p)}</td></tr>"
+        for i, (p, t) in enumerate(routes)
     )
+    summary_html = f"""
+    <div style="
+        position: fixed; top: 10px; left: 55px; z-index: 9999;
+        background: white; border-radius: 10px; padding: 12px 16px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.25); font-family: 'Helvetica Neue', sans-serif;
+        font-size: 12px; max-width: 480px; max-height: 160px; overflow-y: auto;">
+      <div style="font-weight:700;margin-bottom:6px;color:#202124;">📍 Route Summary</div>
+      <table style="border-collapse:collapse;width:100%">{route_rows}</table>
+    </div>
+    """
+    fmap.get_root().html.add_child(folium.Element(summary_html))
 
-    legend_handles = [
-        mpatches.Patch(facecolor=RED_LIGHT,  edgecolor=RED_FILL,  linewidth=1.5, label="Top path node"),
-        mpatches.Patch(facecolor=GREEN_FILL, edgecolor=GREEN_EDGE, linewidth=1.5, label="Destination"),
-        mpatches.Patch(facecolor=GRAY_FILL,  edgecolor=GRAY_EDGE,  linewidth=1.0, label="Off-path node"),
-    ]
-    ax.legend(handles=legend_handles, loc="upper right", fontsize=8, framealpha=0.9)
-    ax.set_title(
-        f"Top path: {' → '.join(str(node) for node in top_path)}   |   "
-        f"Estimated travel time: {round(top_time, 2)} min",
-        fontsize=10, color="#2C2C2A", pad=12,
-    )
-    ax.axis("off")
-    plt.tight_layout()
+    # Render in Streamlit
+    map_html = fmap._repr_html_()
+    components.html(map_html, height=700, scrolling=False)
 
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-    plt.close(fig)
-    buf.seek(0)
-    st.image(buf, use_container_width=True)
 
+# Sidebar
 
 def render_sidebar() -> dict[str, Any]:
-    """Render GUI-only settings and return the currently applied values."""
-
     st.sidebar.header("TBRGS Settings")
     st.sidebar.write("Select route parameters, then apply them to `main.py`.")
 
@@ -324,31 +465,17 @@ def render_sidebar() -> dict[str, Any]:
         format_func=lambda value: MODEL_OPTIONS[value],
         key="draft_model_type",
     )
-
     draft_origin = st.sidebar.number_input(
-        "Origin SCATS site",
-        min_value=0,
-        max_value=999999,
-        value=DEFAULT_ORIGIN,
-        step=1,
-        key="draft_origin",
+        "Origin SCATS site", min_value=0, max_value=999999,
+        value=DEFAULT_ORIGIN, step=1, key="draft_origin",
     )
-
     draft_destination = st.sidebar.number_input(
-        "Destination SCATS site",
-        min_value=0,
-        max_value=999999,
-        value=DEFAULT_DESTINATION,
-        step=1,
-        key="draft_destination",
+        "Destination SCATS site", min_value=0, max_value=999999,
+        value=DEFAULT_DESTINATION, step=1, key="draft_destination",
     )
-
     draft_max_routes = st.sidebar.slider(
-        "Maximum routes to return",
-        min_value=1,
-        max_value=5,
-        value=DEFAULT_MAX_ROUTES,
-        key="draft_max_routes",
+        "Maximum routes to return", min_value=1, max_value=5,
+        value=DEFAULT_MAX_ROUTES, key="draft_max_routes",
     )
 
     draft_settings = {
@@ -379,13 +506,13 @@ def render_sidebar() -> dict[str, Any]:
     return st.session_state.applied_settings
 
 
-def render_route_page(settings: dict[str, Any]) -> None:
-    """Display the main.py result for the selected route settings."""
+# Route page
 
+def render_route_page(settings: dict[str, Any]) -> None:
     st.subheader("Route Guidance")
     st.write(
-        "This GUI page sends the selected sidebar parameters to `main.py` and displays "
-        "the output returned by `main.py`. The GUI does not calculate routes itself."
+        "Parameters are sent to `main.py`; routes are rendered on an interactive "
+        "OpenStreetMap (Folium). Click any segment or marker for details."
     )
 
     if "last_result" not in st.session_state:
@@ -406,9 +533,7 @@ def render_route_page(settings: dict[str, Any]) -> None:
         if "Model not found:" in result["stderr"] or "Scaler not found:" in result["stderr"]:
             st.warning(
                 "The selected model cannot run because its trained model/scaler file is missing. "
-                "Train the selected model first, or choose a model whose files exist. "
-                "The GUI has passed the selected parameters to main.py correctly; main.py failed "
-                "inside the existing prediction pipeline."
+                "Train the selected model first, or choose a model whose files exist."
             )
         if result["stderr"]:
             st.code(result["stderr"], language="text")
@@ -417,72 +542,96 @@ def render_route_page(settings: dict[str, Any]) -> None:
             st.code(result["stdout"], language="text")
         return
 
-    # Graph visualisation of the top path
-    if result.get("routes"):
-        st.write("#### Top path visualisation")
-        render_path_graph(result["routes"], result.get("graph"))
+    # Interactive OSM map
+    all_routes = result.get("routes", [])
+    # Map shows at most 3 routes (top + up to 2 alternates)
+    display_routes = all_routes[:3]
 
-    routes = parse_main_routes(result["stdout"])
-    if routes:
-        st.write("#### All routes")
-        st.dataframe(routes, use_container_width=True, hide_index=True)
-        if len(routes) < params["max_routes"]:
+    if display_routes:
+        n_displayed = len(display_routes)
+        st.write("#### 🗺 Interactive Map  (OpenStreetMap + Folium)")
+        render_osm_map(display_routes, result.get("graph"))
+        if n_displayed == 1:
             st.info(
-                f"main.py returned {len(routes)} route(s), even though {params['max_routes']} "
-                "were requested. This means the graph/search implementation behind main.py "
-                "only found that many valid routes for the selected origin and destination."
+                "Only 1 route was found for this origin–destination pair. "
+                "The map shows the single available route."
             )
+        elif n_displayed == 2:
+            st.info(
+                "Only 2 routes were found for this origin–destination pair — "
+                "both are shown on the map."
+            )
+        # 3 routes: no notice, expected maximum
     else:
-        st.warning("main.py completed, but no route rows were found in its output.")
+        st.warning("No routes returned by main.py — map not rendered.")
+
+    # Route table
+    routes_table = parse_main_routes(result["stdout"])
+    if routes_table:
+        st.write("#### All routes")
+        st.dataframe(routes_table, use_container_width=True, hide_index=True)
+        if len(routes_table) < params["max_routes"]:
+            st.info(
+                f"main.py returned {len(routes_table)} route(s) "
+                f"(requested {params['max_routes']}). "
+                "The search only found that many valid paths."
+            )
 
     st.write("#### Raw main.py output")
     st.code(result["stdout"] or "<no stdout>", language="text")
 
 
-def render_status_page() -> None:
-    """Display GUI-to-main.py integration status."""
+# Status page
 
+def render_status_page() -> None:
     st.subheader("Status")
-    st.write("This page shows whether the GUI can locate and call `main.py`.")
+    st.write("Integration status between the GUI and `main.py`.")
 
     st.write("#### main.py")
-    st.table(
-        [
-            {
-                "Item": "main.py path",
-                "Value": str(MAIN_FILE.relative_to(ROOT_DIR)),
-            },
-            {
-                "Item": "main.py found",
-                "Value": "Yes" if MAIN_FILE.exists() else "No",
-            },
-            {
-                "Item": "GUI role",
-                "Value": "Selection and display only",
-            },
-        ]
+    st.table([
+        {"Item": "main.py path",  "Value": str(MAIN_FILE.relative_to(ROOT_DIR))},
+        {"Item": "main.py found", "Value": "Yes" if MAIN_FILE.exists() else "No"},
+        {"Item": "Map library",   "Value": "Folium + OpenStreetMap (open-source)"},
+        {"Item": "Tile source",   "Value": "OpenStreetMap / CartoDB Positron"},
+        {"Item": "GUI role",      "Value": "Selection, map rendering, display only"},
+    ])
+
+    st.write("#### Coordinates")
+    st.info(
+        "SCATS site coordinates are loaded directly from `processed/all_data.csv`, "
+        "which already contains correct WGS84 lat/lon for all 40 sites. "
+        "Site 4266 (AUBURN_RD N of BURWOOD_RD) has zeroed out coordinates in the CSV "
+        "and is fixed to its true position in `SCATS_COORD_FIXES` in `gui/app.py`."
     )
+    coords = _load_scats_coords()
+    coord_rows = [
+        {"SCATS site": sid, "Location lat": lat, "Location lon": lon,
+         "Source": "fix" if sid in SCATS_COORD_FIXES else "CSV"}
+        for sid, (lat, lon) in sorted(coords.items())
+    ]
+    if coord_rows:
+        st.dataframe(coord_rows, use_container_width=True, hide_index=True)
 
     if "last_result" in st.session_state:
         result = st.session_state.last_result
         st.write("#### Last run")
-        st.table(
-            [
-                {"Item": "Return code", "Value": result["returncode"]},
-                {"Item": "Model", "Value": MODEL_OPTIONS.get(result["params"]["model_type"], result["params"]["model_type"])},
-                {"Item": "Origin", "Value": result["params"]["origin"]},
-                {"Item": "Destination", "Value": result["params"]["destination"]},
-                {"Item": "Maximum routes", "Value": result["params"]["max_routes"]},
-            ]
-        )
+        st.table([
+            {"Item": "Return code",     "Value": result["returncode"]},
+            {"Item": "Model",           "Value": MODEL_OPTIONS.get(result["params"]["model_type"], result["params"]["model_type"])},
+            {"Item": "Origin",          "Value": result["params"]["origin"]},
+            {"Item": "Destination",     "Value": result["params"]["destination"]},
+            {"Item": "Maximum routes",  "Value": result["params"]["max_routes"]},
+        ])
     else:
         st.info("main.py has not been run from the GUI yet.")
 
 
+# Entry point
+
 def main() -> None:
     st.set_page_config(page_title="COS30019 TBRGS", page_icon="🚦", layout="wide")
     st.title("Traffic-Based Route Guidance System")
-    st.caption("COS30019 Assignment 2B — GUI wrapper around main.py")
+    st.caption("COS30019 Assignment 2B — Interactive map powered by OpenStreetMap & Folium")
 
     if not MAIN_FILE.exists():
         st.error("main.py was not found in the project root.")
