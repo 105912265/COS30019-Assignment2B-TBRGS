@@ -472,7 +472,7 @@ def _load_scats_labels() -> dict[int, str]:
         ).drop_duplicates("scats_id")
 
         return {
-            int(r["scats_id"]): f"{int(r['scats_id'])} -- {r['location']}"
+            int(r["scats_id"]): f"{int(r['scats_id'])} - {r['location']}"
             for _, r in meta_df.iterrows()
         }
     except Exception:
